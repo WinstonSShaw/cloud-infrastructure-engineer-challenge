@@ -3,8 +3,8 @@
 Configuration (environment variables):
   DB_HOST, DB_PORT, DB_NAME      connection target
   DB_SECRET_ARN                  Secrets Manager secret with {"username", "password"} (AWS)
-  DB_USER, DB_PASSWORD           plain credentials, only used when DB_SECRET_ARN is unset (local Docker)
-  DB_SSL                         "true" (default) verifies the server certificate against the RDS CA bundle
+  DB_USER, DB_PASSWORD           plain credentials when DB_SECRET_ARN is unset (local Docker)
+  DB_SSL                         "true" (default) verifies the server cert with the RDS CA bundle
   DB_CONNECT_TIMEOUT             seconds, default 5
   DB_INSTANCE_CLASS, DB_MULTI_AZ metadata injected by Terraform
 """
@@ -14,7 +14,7 @@ import logging
 import os
 import ssl
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pg8000.native
@@ -24,7 +24,7 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("AWS_LAMBDA_LOG_LEVEL", "INFO"))
 
 RDS_CA_BUNDLE = Path(__file__).with_name("rds-ca-bundle.pem")
-INVALID_PASSWORD = "28P01"
+AUTH_FAILED_SQLSTATE = "28P01"
 
 # Reused across warm invocations; refreshed when RDS rotates the secret
 _cached_credentials = None
@@ -91,7 +91,7 @@ def _check_database():
         return _query_database(user, password)
     except pg8000.native.DatabaseError as exc:
         error = exc.args[0] if exc.args and isinstance(exc.args[0], dict) else {}
-        if error.get("C") != INVALID_PASSWORD or not os.environ.get("DB_SECRET_ARN"):
+        if error.get("C") != AUTH_FAILED_SQLSTATE or not os.environ.get("DB_SECRET_ARN"):
             raise
         # The cached secret is stale (RDS rotated it): fetch it again and retry once
         logger.warning("Database authentication failed, refreshing credentials")
@@ -125,7 +125,7 @@ def lambda_handler(event, context):
 
     body = {
         "service": "info",
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
         "request_id": getattr(context, "aws_request_id", None),
         "database": database,
     }

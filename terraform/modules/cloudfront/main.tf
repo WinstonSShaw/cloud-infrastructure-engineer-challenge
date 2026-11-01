@@ -19,12 +19,9 @@ locals {
 
 # Accepted risks (documented in docs/security.md):
 # - WAF (AVD-AWS-0011): cost not justified for this scope; API Gateway throttling + Shield Standard apply.
-# - TLS policy (AVD-AWS-0013): the default *.cloudfront.net certificate cannot enforce TLSv1.2_2021,
-#   that needs a custom domain + ACM certificate.
 # - Access logging (AVD-AWS-0010): every request reaching the origin is already in the API Gateway access logs.
 #trivy:ignore:AVD-AWS-0010
 #trivy:ignore:AVD-AWS-0011
-#trivy:ignore:AVD-AWS-0013
 resource "aws_cloudfront_distribution" "this" {
   enabled         = true
   comment         = var.comment
