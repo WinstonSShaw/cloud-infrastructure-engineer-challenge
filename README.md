@@ -6,22 +6,24 @@ Terraform stack that deploys a public `GET /info` endpoint on AWS. **CloudFront 
 
 > The original challenge statement is in [docs/CHALLENGE.md](docs/CHALLENGE.md).
 
+Response from the deployed stack ([full evidence](docs/evidence.md)):
+
 ```json
 {
   "service": "info",
-  "timestamp": "2026-11-01T18:00:00+00:00",
-  "request_id": "8f0c1c3e-...",
+  "timestamp": "2026-11-01T21:52:34+00:00",
+  "request_id": "9d944549-704c-4e47-a99b-bf80ea33a9a1",
   "database": {
     "engine": "postgresql",
     "instance_class": "db.t4g.micro",
     "multi_az": true,
-    "version": "PostgreSQL 17.x on aarch64-unknown-linux-gnu, compiled by gcc ...",
-    "server_version": "17.x",
+    "version": "PostgreSQL 17.9 on aarch64-unknown-linux-gnu, compiled by aarch64-unknown-linux-gnu-gcc (GCC) 12.4.0, 64-bit",
+    "server_version": "17.9",
     "database": "app",
-    "uptime_seconds": 5400,
+    "uptime_seconds": 938,
     "ssl": true,
     "status": "connected",
-    "latency_ms": 41.7
+    "latency_ms": 112.5
   }
 }
 ```
@@ -81,7 +83,7 @@ Detailed request flow, CIDR plan, security group matrix and module map: [docs/ar
 | Lambda logs in CloudWatch | JSON structured logs in `/aws/lambda/<name>` with retention |
 | VPC, public/private subnets, security groups | 3 subnet tiers across 2 AZs, SGs referencing each other ([modules/network](terraform/modules/network)) |
 | Lambda in a private subnet using a NAT Gateway | Private subnets route `0.0.0.0/0` to a NAT Gateway in the public subnet |
-| **Bonus**: High Availability | RDS Multi-AZ, subnets/Lambda in 2 AZs, optional NAT per AZ, RDS storage autoscaling |
+| **Bonus**: High Availability | RDS Multi-AZ ([failover tested](docs/evidence.md#7-multi-az-failover-test)), subnets/Lambda in 2 AZs, optional NAT per AZ, RDS storage autoscaling |
 | **Bonus**: Load Balancer or CloudFront | CloudFront in front of the API ([why not an ALB](docs/decisions.md#adr-004-cloudfront-not-an-alb-for-the-traffic-distribution-bonus)) |
 | **Bonus**: Backup & DR | 7-day automated backups with point-in-time recovery, final snapshot on destroy, tags copied to snapshots |
 | **Bonus**: GitHub Actions validation | `fmt`, `validate`, `tflint`, Trivy, ruff, and an end-to-end Docker test ([ci.yml](.github/workflows/ci.yml)) |
