@@ -93,3 +93,19 @@ variable "db_skip_final_snapshot" {
   type        = bool
   default     = false
 }
+
+################################################################################
+# API
+################################################################################
+
+variable "api_throttling_rate_limit" {
+  description = "Steady-state requests per second allowed by API Gateway."
+  type        = number
+  default     = 10
+}
+
+variable "api_throttling_burst_limit" {
+  description = "Maximum request burst allowed by API Gateway."
+  type        = number
+  default     = 20
+}

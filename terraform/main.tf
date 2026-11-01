@@ -50,3 +50,15 @@ module "lambda" {
     DB_MULTI_AZ       = tostring(module.database.multi_az)
   }
 }
+
+module "api_gateway" {
+  source = "./modules/api_gateway"
+
+  name                   = local.name
+  description            = "Public API exposing GET /info"
+  lambda_function_name   = module.lambda.function_name
+  lambda_invoke_arn      = module.lambda.invoke_arn
+  throttling_rate_limit  = var.api_throttling_rate_limit
+  throttling_burst_limit = var.api_throttling_burst_limit
+  log_retention_days     = var.log_retention_days
+}

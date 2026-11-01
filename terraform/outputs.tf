@@ -1,3 +1,13 @@
+output "api_gateway_info_url" {
+  description = "GET /info served directly by API Gateway."
+  value       = "${module.api_gateway.api_endpoint}/info"
+}
+
+output "api_access_log_group" {
+  description = "CloudWatch log group with the API Gateway access logs."
+  value       = module.api_gateway.access_log_group_name
+}
+
 output "vpc_id" {
   description = "ID of the VPC."
   value       = module.network.vpc_id
