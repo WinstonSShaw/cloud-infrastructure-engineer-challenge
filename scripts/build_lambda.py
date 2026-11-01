@@ -29,20 +29,13 @@ def main():
         shutil.rmtree(BUILD_DIR)
     BUILD_DIR.mkdir(parents=True)
 
-    subprocess.run(
-        [
-            sys.executable, "-m", "pip", "install",
-            "--quiet",
-            "--requirement", str(LAMBDA_DIR / "requirements.txt"),
-            "--target", str(BUILD_DIR),
-            "--platform", PLATFORM,
-            "--python-version", PYTHON_VERSION,
-            "--implementation", "cp",
-            "--only-binary=:all:",
-            "--no-compile",
-        ],
-        check=True,
-    )
+    command = [sys.executable, "-m", "pip", "install", "--quiet", "--no-compile"]
+    command += ["--requirement", str(LAMBDA_DIR / "requirements.txt"), "--target", str(BUILD_DIR)]
+    # Resolve wheels for the Lambda platform, not for the machine running the build
+    command += ["--platform", PLATFORM, "--python-version", PYTHON_VERSION]
+    command += ["--implementation", "cp", "--only-binary=:all:"]
+    # Fixed arguments built above, no user input reaches the command
+    subprocess.run(command, check=True)  # noqa: S603
 
     for source in (LAMBDA_DIR / "src").glob("*.py"):
         shutil.copy2(source, BUILD_DIR)
