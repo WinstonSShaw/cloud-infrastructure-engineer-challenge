@@ -62,3 +62,10 @@ module "api_gateway" {
   throttling_burst_limit = var.api_throttling_burst_limit
   log_retention_days     = var.log_retention_days
 }
+
+module "cloudfront" {
+  source = "./modules/cloudfront"
+
+  origin_domain_name = trimprefix(module.api_gateway.api_endpoint, "https://")
+  comment            = "${local.name} - edge entry point for the Info API"
+}

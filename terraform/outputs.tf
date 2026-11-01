@@ -1,3 +1,13 @@
+output "info_url" {
+  description = "Public entry point: GET /info through CloudFront."
+  value       = "https://${module.cloudfront.domain_name}/info"
+}
+
+output "cloudfront_distribution_id" {
+  description = "ID of the CloudFront distribution."
+  value       = module.cloudfront.distribution_id
+}
+
 output "api_gateway_info_url" {
   description = "GET /info served directly by API Gateway."
   value       = "${module.api_gateway.api_endpoint}/info"
