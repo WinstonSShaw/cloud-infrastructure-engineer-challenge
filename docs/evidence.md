@@ -236,4 +236,6 @@ $ aws cloudwatch describe-alarm-history --alarm-name nanlabs-challenge-dev-api-5
 22:18:58  Successfully executed action arn:aws:sns:us-east-1:<account-id>:nanlabs-challenge-dev-alarms
 ```
 
+Both notifications arrived by email: `ALARM` ("1 datapoint [2.0 (01/11/26 22:08:00)] was greater than the threshold (0.0)", the two `503` responses) and `OK` five minutes later.
+
 Result: the standby in the other AZ took over with no manual action and no configuration change (same endpoint name). Clients saw two failed calls; the outage lasted less than 18 seconds (between the last `200` before and the first `200` after). The `lambda-errors` alarm stayed `OK` because the function handled the outage and answered `503` instead of failing.

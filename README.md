@@ -43,6 +43,7 @@ If the database is unreachable the endpoint answers `503` with `"status": "unrea
 - [Configuration](#configuration)
 - [Cost](#cost)
 - [Assumptions and constraints](#assumptions-and-constraints)
+- [Suggested next steps](#suggested-next-steps)
 - [Teardown](#teardown)
 
 ## Architecture
@@ -275,6 +276,23 @@ Approximate on-demand prices in `us-east-1` with the defaults:
 - **No custom domain**: CloudFront uses its default `*.cloudfront.net` certificate.
 - **No reserved concurrency on the Lambda**: new AWS accounts have a concurrency quota of 10, which makes reserving concurrency fail; API Gateway throttling bounds the load instead.
 - **Disposable defaults**: deletion protection is off and a final snapshot is kept so `terraform destroy` works cleanly.
+
+## Suggested next steps
+
+Not implemented on purpose, to keep the solution focused on the challenge. This is the order in which I would take the stack to production:
+
+| # | Improvement | Why |
+|---|---|---|
+| 1 | **Authentication and WAF**: JWT/IAM authorizer on the HTTP API, AWS WAF on CloudFront, and only accept traffic that comes through CloudFront | The endpoint is public by design for the challenge |
+| 2 | **Least-privilege database user**: a read-only role created by a migration, with its own secret | The Lambda uses the RDS master secret today |
+| 3 | **Continuous delivery with OIDC**: GitHub Actions assumes an IAM role (no access keys), posts `terraform plan` on each PR and applies on merge after a manual approval, with the S3 remote state | Deployments are manual from a workstation today |
+| 4 | **Secrets Manager VPC endpoint** | Restricts the Lambda egress to the VPC and removes the NAT dependency for credentials |
+| 5 | **RDS Proxy** | Connection pooling if traffic grows (one connection per invocation today) and shorter failovers than the ~18 s [measured](docs/evidence.md#7-multi-az-failover-test) |
+| 6 | **One NAT Gateway per AZ** (`single_nat_gateway = false`) | Outbound traffic no longer depends on a single AZ (~US$36/month more) |
+| 7 | **Disaster recovery across regions**: AWS Backup with cross-region copies, agreed RPO/RTO and periodic restore tests | Backups live in the same region as the database |
+| 8 | **Deeper observability**: X-Ray tracing, a CloudWatch dashboard, a Synthetics canary on `/info`, CloudWatch Database Insights | Alarms say that something broke, not where |
+| 9 | **Compliance hardening if required**: customer managed KMS keys, deletion protection, CloudFront access logs | Accepted risks listed in [docs/security.md](docs/security.md) |
+| 10 | **More environments**: one state and `tfvars` per environment | The code is already parametrized by `project` and `environment` |
 
 ## Teardown
 

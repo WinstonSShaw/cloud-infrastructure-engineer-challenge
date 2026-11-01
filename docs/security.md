@@ -41,6 +41,8 @@ Lower-severity findings, not blocking, left as improvements:
 
 ## Not in scope / production next steps
 
+Security items only; the full prioritized list is in the [README](../README.md#suggested-next-steps).
+
 - **Authentication:** `GET /info` is public by design for the challenge. In production, add a JWT/IAM authorizer on the HTTP API and WAF on CloudFront, and only accept traffic that comes through CloudFront (secret origin header or a custom domain).
 - **Least-privilege database user:** create a read-only role through a migration and point the Lambda at its secret instead of the master user.
 - **Custom domain** with an ACM certificate to enforce a modern TLS policy (`TLSv1.2_2021`) at the edge.
