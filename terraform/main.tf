@@ -69,3 +69,14 @@ module "cloudfront" {
   origin_domain_name = trimprefix(module.api_gateway.api_endpoint, "https://")
   comment            = "${local.name} - edge entry point for the Info API"
 }
+
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  name                 = local.name
+  alarm_email          = var.alarm_email
+  db_instance_id       = module.database.instance_id
+  lambda_function_name = module.lambda.function_name
+  api_id               = module.api_gateway.api_id
+  api_stage            = module.api_gateway.stage_name
+}

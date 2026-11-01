@@ -109,3 +109,13 @@ variable "api_throttling_burst_limit" {
   type        = number
   default     = 20
 }
+
+################################################################################
+# Monitoring
+################################################################################
+
+variable "alarm_email" {
+  description = "Email notified by the CloudWatch alarms (confirm the subscription email). null = no notifications."
+  type        = string
+  default     = null
+}

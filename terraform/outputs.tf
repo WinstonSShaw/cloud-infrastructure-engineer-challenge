@@ -47,3 +47,8 @@ output "lambda_log_group" {
   description = "CloudWatch log group with the Lambda logs."
   value       = module.lambda.log_group_name
 }
+
+output "alarms_sns_topic_arn" {
+  description = "SNS topic receiving the CloudWatch alarm notifications."
+  value       = module.monitoring.sns_topic_arn
+}
