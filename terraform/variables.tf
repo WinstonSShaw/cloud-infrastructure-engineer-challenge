@@ -53,3 +53,43 @@ variable "single_nat_gateway" {
   type        = bool
   default     = true
 }
+
+################################################################################
+# Database
+################################################################################
+
+variable "db_engine_version" {
+  description = "PostgreSQL version (major only lets RDS pick the latest default minor)."
+  type        = string
+  default     = "17"
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_multi_az" {
+  description = "Run RDS Multi-AZ (synchronous standby + automatic failover)."
+  type        = bool
+  default     = true
+}
+
+variable "db_backup_retention_days" {
+  description = "Days to keep automated RDS backups (point-in-time recovery window)."
+  type        = number
+  default     = 7
+}
+
+variable "db_deletion_protection" {
+  description = "Protect the RDS instance from deletion. Set to true outside of disposable environments."
+  type        = bool
+  default     = false
+}
+
+variable "db_skip_final_snapshot" {
+  description = "Skip the final snapshot on destroy (false keeps a \"<name>-final\" snapshot)."
+  type        = bool
+  default     = false
+}
