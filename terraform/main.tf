@@ -30,3 +30,23 @@ module "database" {
   skip_final_snapshot   = var.db_skip_final_snapshot
   log_retention_days    = var.log_retention_days
 }
+
+module "lambda" {
+  source = "./modules/lambda"
+
+  name               = "${local.name}-info"
+  description        = "GET /info: database connection status and metadata"
+  source_dir         = "${path.root}/../lambda/build"
+  subnet_ids         = module.network.private_subnet_ids
+  security_group_ids = [module.network.lambda_security_group_id]
+  secret_arn         = module.database.master_user_secret_arn
+  log_retention_days = var.log_retention_days
+
+  environment_variables = {
+    DB_HOST           = module.database.address
+    DB_PORT           = tostring(module.database.port)
+    DB_NAME           = module.database.database_name
+    DB_INSTANCE_CLASS = module.database.instance_class
+    DB_MULTI_AZ       = tostring(module.database.multi_az)
+  }
+}
