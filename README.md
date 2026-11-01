@@ -1,88 +1,286 @@
-# 🚀 Cloud Infrastructure Engineer Challenge
+# Cloud Infrastructure Engineer Challenge: Solution
 
-Welcome to the **Cloud Infrastructure Engineer Challenge!** 🎉 This challenge is designed to evaluate your ability to work with **Infrastructure as Code (IaC)**, AWS networking, IAM, and automation using modern DevOps practices.
+[![CI](https://github.com/WinstonSShaw/cloud-infrastructure-engineer-challenge/actions/workflows/ci.yml/badge.svg)](https://github.com/WinstonSShaw/cloud-infrastructure-engineer-challenge/actions/workflows/ci.yml)
 
-> [!NOTE]
-> You can use **any IaC tool of your choice** (Terraform preferred, but alternatives are allowed). If you choose a different tool or a combination of tools, **justify your decision!**
+Terraform stack that deploys a public `GET /info` endpoint on AWS. **CloudFront -> API Gateway -> Lambda (private subnet) -> RDS PostgreSQL (isolated subnet)**: the Lambda connects to the database and returns its connection status and metadata as JSON.
 
-## ⚡ Challenge Overview
+> The original challenge statement is in [docs/CHALLENGE.md](docs/CHALLENGE.md).
 
-Your task is to deploy the following infrastructure on AWS:
+```json
+{
+  "service": "info",
+  "timestamp": "2026-11-01T18:00:00+00:00",
+  "request_id": "8f0c1c3e-...",
+  "database": {
+    "engine": "postgresql",
+    "instance_class": "db.t4g.micro",
+    "multi_az": true,
+    "version": "PostgreSQL 17.x on aarch64-unknown-linux-gnu, compiled by gcc ...",
+    "server_version": "17.x",
+    "database": "app",
+    "uptime_seconds": 5400,
+    "ssl": true,
+    "status": "connected",
+    "latency_ms": 41.7
+  }
+}
+```
 
-> 🎯 **Key Objectives:**
+If the database is unreachable the endpoint answers `503` with `"status": "unreachable"` and the error type; the full error goes to CloudWatch Logs only.
 
-- **An API Gateway** with a single endpoint (`GET /info`).
-- **A Lambda function** triggered by the API Gateway.
-- **A database instance or application backend** running in a private subnet. This can be:
-  - A **PostgreSQL RDS instance** 📦
-  - A **self-hosted database** on an EC2 instance 🔗
-  - A **deployed application** such as WordPress hosted on EC2 🎨
-- **The Lambda function must connect** to the database/backend and return basic information about its connection and status.
-- **Logs from the Lambda** should be visible in CloudWatch 📊
-- **Networking must include:** VPC, public/private subnets, and security groups.
-- **The Lambda must be in a private subnet** and use a NAT Gateway in a public subnet for internet access 🌍
+## Contents
 
-> [!IMPORTANT]
-> Ensure that your solution is modular, well-documented, and follows best practices for security and maintainability.
+- [Architecture](#architecture)
+- [Requirements coverage](#requirements-coverage)
+- [Tool selection](#tool-selection)
+- [Repository layout](#repository-layout)
+- [Deployment](#deployment)
+- [Testing the endpoint and viewing logs](#testing-the-endpoint-and-viewing-logs)
+- [Local testing with Docker](#local-testing-with-docker)
+- [CI and pre-commit hooks](#ci-and-pre-commit-hooks)
+- [Configuration](#configuration)
+- [Cost](#cost)
+- [Assumptions and constraints](#assumptions-and-constraints)
+- [Teardown](#teardown)
 
-## 📌 Requirements
+## Architecture
 
-### ⚙️ Tech Stack
+```mermaid
+flowchart LR
+    client([Client]) -->|HTTPS GET /info| cf[CloudFront]
+    cf -->|HTTPS| apigw[API Gateway<br/>HTTP API]
+    apigw -->|Lambda proxy| lambda
 
-> ⚡ **Must Include:**
+    subgraph vpc["VPC (2 AZs)"]
+        subgraph public["Public subnets"]
+            nat[NAT Gateway]
+        end
+        subgraph private["Private subnets"]
+            lambda[Lambda<br/>Python 3.13]
+        end
+        subgraph database["Database subnets (no internet route)"]
+            rds[("RDS PostgreSQL 17<br/>Multi-AZ")]
+        end
+    end
 
-- **IaC:** Any tool of your choice (**Terraform preferred**, but others are allowed if justified).
-- **AWS Services:** VPC, API Gateway, Lambda, CloudWatch, NAT Gateway, RDS or EC2.
+    lambda -->|5432 TLS| rds
+    lambda -->|443| nat --> sm[Secrets Manager]
+    lambda -.->|JSON logs| cw[CloudWatch Logs<br/>+ Alarms -> SNS]
+```
 
-### 📦 Deliverables
+Detailed request flow, CIDR plan, security group matrix and module map: [docs/architecture.md](docs/architecture.md).
 
-> 📥 **Your submission must be a Pull Request that must include:**
+## Requirements coverage
 
-- **An IaC module** that deploys the entire architecture.
-- **A `README.md`** with deployment instructions and tool selection justification.
-- **A working API Gateway endpoint** that responds with a JSON payload from the Lambda, including:
-  - Connection status to the database or backend.
-  - Basic metadata about the target system (e.g., DB version, instance type, WordPress version, etc.).
-- **CloudWatch logs** from the Lambda.
+| Requirement | Implementation |
+|---|---|
+| API Gateway with `GET /info` | HTTP API, single `GET /info` route, Lambda proxy integration ([modules/api_gateway](terraform/modules/api_gateway)) |
+| Lambda triggered by API Gateway | Python 3.13 / arm64, invoke permission scoped to that route ([modules/lambda](terraform/modules/lambda), [lambda/src/handler.py](lambda/src/handler.py)) |
+| Database in a private subnet | RDS PostgreSQL 17 in isolated subnets, not publicly accessible ([modules/database](terraform/modules/database)) |
+| Lambda connects and returns status + metadata | Connection status, version, uptime, TLS in use, instance class, Multi-AZ |
+| Lambda logs in CloudWatch | JSON structured logs in `/aws/lambda/<name>` with retention |
+| VPC, public/private subnets, security groups | 3 subnet tiers across 2 AZs, SGs referencing each other ([modules/network](terraform/modules/network)) |
+| Lambda in a private subnet using a NAT Gateway | Private subnets route `0.0.0.0/0` to a NAT Gateway in the public subnet |
+| **Bonus**: High Availability | RDS Multi-AZ, subnets/Lambda in 2 AZs, optional NAT per AZ, RDS storage autoscaling |
+| **Bonus**: Load Balancer or CloudFront | CloudFront in front of the API ([why not an ALB](docs/decisions.md#adr-004-cloudfront-not-an-alb-for-the-traffic-distribution-bonus)) |
+| **Bonus**: Backup & DR | 7-day automated backups with point-in-time recovery, final snapshot on destroy, tags copied to snapshots |
+| **Bonus**: GitHub Actions validation | `fmt`, `validate`, `tflint`, Trivy, ruff, and an end-to-end Docker test ([ci.yml](.github/workflows/ci.yml)) |
+| **Bonus**: Pre-commit hooks | Linting + security checks ([.pre-commit-config.yaml](.pre-commit-config.yaml)) |
+| **Bonus**: Monitoring | CloudWatch alarms for RDS CPU/storage/connections, Lambda errors/throttles, API 5xx -> SNS ([modules/monitoring](terraform/modules/monitoring)) |
+| **Bonus**: Docker for local testing | PostgreSQL 17 + the official Lambda runtime image ([docker-compose.yml](docker-compose.yml)) |
 
-> [!TIP]
-> Use the `docs` folder to store any additional documentation or diagrams that help explain your solution.
-> Mention any assumptions or constraints in your `README.md`.
+## Tool selection
 
-## 🌟 Nice to Have
+**Terraform** is the IaC tool. It is the preferred option in the challenge, has the most mature AWS provider, and `terraform plan` gives reviewers an exact diff before anything changes. The stack is a root module composed of six small local modules: each module owns one concern and exposes only the inputs it needs, so every networking and security decision is visible in the code instead of behind a large community module.
 
-> 💡 **Bonus Points For:**
+Other choices, with alternatives and trade-offs, are recorded as ADRs in [docs/decisions.md](docs/decisions.md):
 
-- **Auto Scaling & High Availability**: Implementing **Multi-AZ for RDS** or an **Auto Scaling Group for EC2** to improve availability.  
-- **Load Balancer or CloudFront**: Adding an **Application Load Balancer (ALB)** or **CloudFront** for distributing traffic efficiently.  
-- **Backup & Disaster Recovery**: Implementing **automated backups for RDS** or **snapshot strategies**.  
-- **GitHub Actions for validation**: Running **`terraform fmt`, `terraform validate`**, or equivalent for the chosen IaC tool.  
-- **Pre-commit hooks**: Ensuring linting and security checks before committing.  
-- **Monitoring & Logging**: Setting up **AWS CloudWatch Alarms for infrastructure health (e.g., RDS CPU usage, EC2 status)**.  
-- **Docker for local testing**: Using Docker to **simulate infrastructure components** (e.g., a local PostgreSQL instance).
+- **RDS PostgreSQL** over a database on EC2: Multi-AZ, backups, patching and secrets management are managed features.
+- **HTTP API** over REST API: simpler and ~70% cheaper for a single proxied route.
+- **CloudFront** over an ALB: an ALB cannot sit in front of API Gateway.
+- **RDS-managed secret** in Secrets Manager: no credential ever touches code or Terraform state.
+- **Python + pg8000**: a pure-Python driver, so the package builds identically on any OS.
 
-> [!TIP]
-> Looking for inspiration or additional ideas to earn extra points? Check out our [Awesome NaNLABS repository](https://github.com/nanlabs/awesome-nan) for reference projects and best practices! 🚀
+## Repository layout
 
-## 📥 Submission Guidelines
+```text
+.
+├── terraform/                  # Root module: wires the modules together
+│   ├── main.tf  variables.tf  outputs.tf  providers.tf  versions.tf
+│   ├── terraform.tfvars.example
+│   └── modules/
+│       ├── network/            # VPC, subnets, NAT, routes, security groups, flow logs
+│       ├── database/           # RDS PostgreSQL
+│       ├── lambda/             # Function, IAM role, log group
+│       ├── api_gateway/        # HTTP API, GET /info, access logs
+│       ├── cloudfront/         # Distribution in front of the API
+│       └── monitoring/         # CloudWatch alarms + SNS
+├── lambda/
+│   ├── src/handler.py          # Function code
+│   ├── requirements.txt
+│   ├── Dockerfile              # Local runtime (Lambda base image)
+│   └── events/get-info.json    # Sample API Gateway event
+├── scripts/build_lambda.py     # Builds the deployment package for the Lambda platform
+├── docker-compose.yml          # Local PostgreSQL + Lambda
+├── docs/                       # Architecture, ADRs, security, evidence, original challenge
+└── .github/workflows/ci.yml    # CI pipeline
+```
 
-> 📌 **Follow these steps to submit your solution:**
+## Deployment
 
-1. **Fork this repository.**
-2. **Create a feature branch** for your implementation.
-3. **Commit your changes** with meaningful commit messages.
-4. **Open a Pull Request** following the provided template.
-5. **Our team will review** and provide feedback.
+### Prerequisites
 
-## ✅ Evaluation Criteria
+- An AWS account and credentials with permissions to create the resources (e.g. an `AdministratorAccess` profile for a sandbox account).
+- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.10
+- Python 3 with `pip` (only to build the Lambda package)
+- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) (to read logs and clean up)
 
-> 🔍 **What we'll be looking at:**
+### Steps
 
-- **Correctness and completeness** of the deployed **infrastructure**.  
-- **Use of best practices for networking and security** (VPC, subnets, IAM).  
-- **Scalability & High Availability considerations** (optional. e.g., Multi-AZ, Auto Scaling, Load Balancer).  
-- **Backup & Disaster Recovery strategies** implemented (optional).  
-- **CI/CD automation using GitHub Actions and pre-commit hooks** (optional).  
-- **Documentation clarity**: Clear explanation of infrastructure choices and configurations.
+```bash
+# 1. Build the Lambda package (dependencies resolved for Linux arm64 / Python 3.13)
+python scripts/build_lambda.py
 
-## 🎯 **Good luck and happy coding!** 🚀
+# 2. Deploy (~15-20 min: RDS Multi-AZ and CloudFront take the longest)
+export AWS_PROFILE=<your-profile>          # PowerShell: $env:AWS_PROFILE = "<your-profile>"
+cd terraform
+cp terraform.tfvars.example terraform.tfvars   # optional, every variable has a default
+terraform init
+terraform plan -out tfplan
+terraform apply tfplan
+```
+
+Main outputs:
+
+| Output | Description |
+|---|---|
+| `info_url` | Public endpoint through CloudFront |
+| `api_gateway_info_url` | Same endpoint served directly by API Gateway |
+| `lambda_log_group` | CloudWatch log group of the Lambda |
+| `database_endpoint` | Private RDS endpoint (only reachable inside the VPC) |
+| `database_secret_arn` | RDS-managed secret with the DB credentials |
+
+### Remote state (team usage)
+
+State is local by default so the stack can be deployed into any account without a bootstrap step. For shared use, add an S3 backend with native locking (Terraform >= 1.10, no DynamoDB table needed):
+
+```hcl
+# terraform/backend.tf
+terraform {
+  backend "s3" {
+    bucket       = "<state-bucket>"
+    key          = "cloud-infrastructure-challenge/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+```
+
+## Testing the endpoint and viewing logs
+
+```bash
+curl -s "$(terraform output -raw info_url)" | jq
+# PowerShell: Invoke-RestMethod (terraform output -raw info_url) | ConvertTo-Json -Depth 5
+
+# Lambda logs (live tail)
+aws logs tail "$(terraform output -raw lambda_log_group)" --follow
+```
+
+CloudWatch Logs Insights query over the Lambda log group:
+
+```text
+fields @timestamp, level, message, db_status, latency_ms
+| filter message = "Database health check"
+| sort @timestamp desc
+```
+
+Evidence from a real deployment (responses, logs, alarms): [docs/evidence.md](docs/evidence.md).
+
+## Local testing with Docker
+
+The real handler runs in the official Lambda Python 3.13 image (which includes the Runtime Interface Emulator) against PostgreSQL 17:
+
+```bash
+docker compose up --detach --build --wait
+
+# Invoke GET /info with an API Gateway v2 event (PowerShell: use curl.exe)
+curl -s -X POST http://localhost:9000/2015-03-31/functions/function/invocations \
+  --data-binary @lambda/events/get-info.json | jq '.body | fromjson'
+
+# Simulate a database outage -> 503 "unreachable"
+docker compose stop postgres
+
+docker compose down --volumes
+```
+
+Locally the function reads credentials from environment variables and does not use TLS; in AWS it uses the Secrets Manager secret and verifies the RDS certificate. CI runs this same scenario on every pull request.
+
+## CI and pre-commit hooks
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on pushes to `main`:
+
+| Job | What it checks |
+|---|---|
+| `pre-commit` | Every hook below |
+| `trivy` | IaC misconfiguration scan, **blocking** on HIGH/CRITICAL (accepted risks are annotated, see [docs/security.md](docs/security.md)) |
+| `lambda-local` | Docker end-to-end test: `200 connected`, then `503 unreachable` with the DB stopped |
+
+Hooks ([`.pre-commit-config.yaml`](.pre-commit-config.yaml)): file hygiene, private key / AWS credential detection, `terraform fmt`, `terraform validate`, `tflint` (AWS ruleset), `trivy`, `ruff` (lint + bandit security rules + format).
+
+```bash
+pip install pre-commit
+pre-commit install            # runs on every commit
+pre-commit run --all-files    # requires terraform, tflint and trivy on PATH
+```
+
+## Configuration
+
+All variables have defaults; see [`terraform/variables.tf`](terraform/variables.tf) and [`terraform.tfvars.example`](terraform/terraform.tfvars.example). The most relevant:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `aws_region` | `us-east-1` | Target region |
+| `single_nat_gateway` | `true` | `false` = one NAT Gateway per AZ |
+| `db_multi_az` | `true` | RDS synchronous standby with automatic failover |
+| `db_backup_retention_days` | `7` | Automated backups / PITR window |
+| `db_deletion_protection` | `false` | Set `true` for production |
+| `db_skip_final_snapshot` | `false` | Keep a final snapshot on destroy |
+| `api_throttling_rate_limit` / `api_throttling_burst_limit` | `10` / `20` | Protects the database from request spikes |
+| `alarm_email` | `null` | Email subscribed to the alarms topic |
+| `log_retention_days` | `14` | Retention of every log group |
+
+## Cost
+
+Approximate on-demand prices in `us-east-1` with the defaults:
+
+| Resource | ~US$/month |
+|---|---|
+| NAT Gateway (1) + Elastic IP | 36.5 + data processing |
+| RDS `db.t4g.micro` Multi-AZ + 20 GiB gp3 | 23.4 + 4.6 |
+| Secrets Manager secret | 0.4 |
+| Lambda, API Gateway, CloudFront, CloudWatch | < 1 at challenge traffic |
+| **Total** | **~65 / month (~2.2 / day)** |
+
+`db_multi_az = false` saves ~US$14/month. The NAT Gateway is the largest fixed cost and is required by the challenge.
+
+## Assumptions and constraints
+
+- **Public, unauthenticated endpoint**: the challenge asks for a working public endpoint. It is protected by throttling and Shield Standard; production would add an authorizer and WAF ([docs/security.md](docs/security.md)).
+- **The Lambda uses the RDS master credentials** (RDS-managed secret). Creating a least-privilege database user requires running SQL inside the private network, which is out of scope for a pure-Terraform deployment; it is the first production follow-up.
+- **API Gateway is also reachable directly**, not only through CloudFront. Restricting the origin requires a custom domain or a secret header check.
+- **One environment, local state**: variables (`environment`, `project`) and the documented S3 backend allow more environments without code changes.
+- **No custom domain**: CloudFront uses its default `*.cloudfront.net` certificate.
+- **No reserved concurrency on the Lambda**: new AWS accounts have a concurrency quota of 10, which makes reserving concurrency fail; API Gateway throttling bounds the load instead.
+- **Disposable defaults**: deletion protection is off and a final snapshot is kept so `terraform destroy` works cleanly.
+
+## Teardown
+
+```bash
+cd terraform
+terraform destroy
+# The final RDS snapshot is kept on purpose; delete it when no longer needed:
+aws rds delete-db-snapshot --db-snapshot-identifier nanlabs-challenge-dev-postgres-final
+```
+
+Destroying the Lambda's VPC network interfaces can take a few minutes; this is normal.
