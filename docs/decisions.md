@@ -47,7 +47,7 @@ Short ADRs for the decisions that shape the solution. Status of all of them: **A
 ## ADR-007: Availability vs cost defaults
 
 - **Decision:** RDS **Multi-AZ on** by default; **one shared NAT Gateway** by default (`single_nat_gateway = false` gives one per AZ).
-- **Rationale:** the database is the stateful component, so losing its AZ means downtime and possibly data loss; Multi-AZ on `db.t4g.micro` costs ~US$12/month extra. A second NAT Gateway costs ~US$33/month and, for an AZ outage, only affects the Lambda's access to Secrets Manager from that AZ, and only on cold starts. Route tables are already per AZ, so changing it is one variable.
+- **Rationale:** the database is the stateful component, so losing its AZ means downtime and possibly data loss; Multi-AZ on `db.t4g.micro` costs ~US$14/month extra (standby instance and storage). A second NAT Gateway costs ~US$36/month with its Elastic IP and, for an AZ outage, only affects the Lambda's access to Secrets Manager from that AZ, and only on cold starts. Route tables are already per AZ, so changing it is one variable.
 
 ## ADR-008: Local Terraform state by default
 
